@@ -1,0 +1,107 @@
+import dotenv from 'dotenv';
+dotenv.config(); // Cargar las variables de entorno desde el archivo .env
+
+import { I18n } from 'i18n'; // Asegúrate de que estás importando correctamente
+
+// Configuración de i18n
+const i18n = new I18n({
+    locales: ['en', 'es'], // Idiomas que vas a usar
+    directory: './locales', // Asegúrate de que esta ruta sea correcta
+    defaultLocale: 'en',
+});
+
+// Asegúrate de que la instancia de i18n esté disponible globalmente
+I18n.setInstance(i18n);
+
+// Definición de los entrypoints
+type Entrypoint = { include?: string[]; exclude?: string[]; intents?: GatewayIntentBits[] }
+const ENTRYPOINTS: Record<string, Entrypoint> = {
+    external: {
+        include: ["modules/vouch-system", "modules/ranked"],
+    },
+    internal: {
+        include: ["modules"],
+        exclude: ["modules/vouch-system", "modules/ranked"],
+        intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMembers,
+            GatewayIntentBits.GuildPresences,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.MessageContent,
+            GatewayIntentBits.GuildModeration,
+            GatewayIntentBits.GuildMessageReactions,
+            GatewayIntentBits.GuildVoiceStates,
+        ],
+    },
+}
+
+// Obtener el comando desde los argumentos de la línea de comandos
+const command = process.argv[2]?.toLowerCase() ?? ""
+const entrypoint = ENTRYPOINTS[command]
+if (!entrypoint) {
+    console.error("Comando desconocido '%s'!", command)
+    process.exit(1)
+}
+
+// Cargar los locales para la internacionalización
+I18n.loadLocales(ASSETS + "lang"); // Asegúrate de que esto esté antes de usar I18n
+
+// Configurar los intents
+const intents = [GatewayIntentBits.DirectMessages]
+if (entrypoint.intents) intents.push(...entrypoint.intents)
+
+// Configurar la presencia del bot
+const presence = resolvePresence()
+const bot = new DiscordBot({ intents, presence })
+
+// Cargar los módulos
+const modules = new ModuleLoader(command)
+for (const include of entrypoint.include ?? []) {
+    await modules.load(include, entrypoint.exclude)
+}
+
+// Registro del comando vouch
+CommandInstaller.installCommand(vouchCommand); // Cambia esto según el método correcto
+
+// Manejo de señales de terminación
+process.on("SIGTERM", () => shutdown(0))
+process.on("SIGINT", () => shutdown(0))
+
+try {
+    if (TEST) {
+        console.log(
+            `\x1b[32m${command!.toUpperCase()} cargado exitosamente:` +
+                `${getLine("Intents")}${intents.map((v) => GatewayIntentBits[v]).join("\n") || "Ninguno"}` +
+                `${getLine("Módulos")}${Object.keys(BotModule.instances).join("\n") || "Ninguno"}` +
+                `${getLine("Comandos")}${CommandInstaller.getCommandNames().join("\n") || "Ninguno"}` +
+                `${getLine("Modelos")}${DB.getModels().join("\n") || "Ninguno"}` +
+                `${getLine("Importaciones")}${modules.getLoaded().join("\n") || "Ninguno"}\n`,
+        )
+        process.exit(0)
+    } else {
+        await startup(bot);
+    }
+} catch (error) {
+    console.error("Error durante el inicio:", error);
+    process.exit(1);
+}
+
+// Función para resolver la presencia del bot
+function resolvePresence(): PresenceData {
+    return {
+        activities: [{ name: "¡Estoy aquí para ayudar!", type: ActivityType.Playing }],
+        status: "online",
+    };
+}
+
+// Función para manejar el apagado del bot
+async function shutdown(code: number) {
+    console.log("Apagando el bot...");
+    await bot.destroy();
+    process.exit(code);
+}
+
+// Función para obtener una línea formateada
+function getLine(title: string): string {
+    return `\n \x1b[34m${title}:\x1b[0m `;
+}
